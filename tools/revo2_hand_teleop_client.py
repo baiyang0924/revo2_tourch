@@ -81,6 +81,10 @@ def main() -> int:
     ap.add_argument("--rate", type=float, default=20.0, help="下发频率 Hz")
     ap.add_argument("--model", default=r"D:\sim\hand_landmarker.task")
     ap.add_argument("--gain", type=float, default=1.0, help="灵敏度倍率")
+    ap.add_argument("--hand", choices=["left", "right", "auto"], default="right",
+                    help="跟随操作者的哪只手，默认 right。auto = 跟先检测到的那只")
+    ap.add_argument("--idle", type=float, default=2.5,
+                    help="手静止超过这么多秒就停止下发，交回底层控制以省电降温，默认 2.5")
     ap.add_argument("--dry-run", action="store_true", help="只显示不发送")
     args = ap.parse_args()
 
@@ -118,6 +122,8 @@ def main() -> int:
     fps_t = time.time()
     frames = 0
     fps = 0.0
+    last_vals = [0] * 6
+    last_move = time.time()
 
     while True:
         ok, frame = cap.read()
@@ -130,36 +136,67 @@ def main() -> int:
             mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), ts)
 
         vals = None
+        handlabel = ""
+        skip = False
         if res.hand_landmarks:
-            L = res.hand_landmarks[0]
-            raw = [
-                finger_curl(L, T_MCP, T_IP, T_TIP, T_TIP) * 0.9 + 0.05,  # 拇指屈曲（近似）
-                thumb_spread(L),
-                finger_curl(L, I_MCP, I_PIP, I_DIP, I_TIP),
-                finger_curl(L, M_MCP, M_PIP, M_DIP, M_TIP),
-                finger_curl(L, R_MCP, R_PIP, R_DIP, R_TIP),
-                finger_curl(L, P_MCP, P_PIP, P_DIP, P_TIP),
-            ]
-            raw = [clamp(v * gain) for v in raw]
-            # 指数平滑，去掉识别抖动
-            for i in range(6):
-                smooth[i] = smooth[i] + 0.45 * (raw[i] - smooth[i])
-            vals = [int(round(v * 1000)) for v in smooth]
+            # 画面做过镜像，因此 MediaPipe 报的左右与操作者实际相反
+            if res.handedness:
+                mp_side = res.handedness[0][0].category_name          # "Left" / "Right"
+                user_side = "right" if mp_side == "Left" else "left"
+                handlabel = f"{user_side}(MP={mp_side})"
+                if args.hand != "auto" and user_side != args.hand:
+                    skip = True          # 不是要跟的那只手，本帧跳过
+            if not skip:
+                L = res.hand_landmarks[0]
+                raw = [
+                    finger_curl(L, T_MCP, T_IP, T_TIP, T_TIP) * 0.9 + 0.05,
+                    thumb_spread(L),
+                    finger_curl(L, I_MCP, I_PIP, I_DIP, I_TIP),
+                    finger_curl(L, M_MCP, M_PIP, M_DIP, M_TIP),
+                    finger_curl(L, R_MCP, R_PIP, R_DIP, R_TIP),
+                    finger_curl(L, P_MCP, P_PIP, P_DIP, P_TIP),
+                ]
+                raw = [clamp(v * gain) for v in raw]
+                for i in range(6):
+                    smooth[i] = smooth[i] + 0.45 * (raw[i] - smooth[i])
+                vals = [int(round(v * 1000)) for v in smooth]
 
-            # 画关键点
-            h, w = frame.shape[:2]
-            for p in L:
-                cv2.circle(frame, (int(p.x * w), int(p.y * h)), 3, (0, 255, 0), -1)
+                h, w = frame.shape[:2]
+                for p in L:
+                    cv2.circle(frame, (int(p.x * w), int(p.y * h)), 3, (0, 255, 0), -1)
 
-        # 发送
+        # 发送（含静止降频：手不动就停止下发，让电机卸力降温）
         now = time.time()
-        if vals and sock and now - last_send >= period:
+        moving = False
+        if vals:
+            moved = max(abs(vals[i] - last_vals[i]) for i in range(6))
+            if moved > 25:            # 变化超过 2.5% 视为在动
+                moving = True
+                last_move = now
+        if sock:
+            # 非阻塞读回执，服务端报错（如"下发失败"）能立刻看到，不再黑箱
             try:
-                sock.sendall((",".join(str(v) for v in vals) + "\n").encode())
-                last_send = now
-            except Exception as exc:  # noqa: BLE001
-                print("发送失败：", exc)
-                break
+                sock.setblocking(False)
+                err = sock.recv(300)
+                if err:
+                    print("  [服务端]", err.decode(errors="ignore").strip())
+                sock.setblocking(True)
+            except Exception:
+                try:
+                    sock.setblocking(True)
+                except Exception:
+                    pass
+
+            if vals and moving and now - last_send >= period:
+                try:
+                    sock.sendall((",".join(str(v) for v in vals) + "\n").encode())
+                    last_send = now
+                    last_vals = list(vals)
+                except Exception as exc:  # noqa: BLE001
+                    print("发送失败：", exc)
+                    break
+            elif vals and not moving and now - last_move > args.idle:
+                pass                  # 静止超时：不下发，服务端会在 1.5s 后交回底层控制
 
         # HUD
         frames += 1
@@ -167,7 +204,7 @@ def main() -> int:
             fps = frames / (now - fps_t)
             frames = 0
             fps_t = now
-        cv2.putText(frame, f"FPS {fps:.0f}  gain {gain:.2f}", (10, 24),
+        cv2.putText(frame, f"FPS {fps:.0f}  gain {gain:.2f}  hand {handlabel or '-'}", (10, 24),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
         y = 50
         for i, n in enumerate(NAMES):
