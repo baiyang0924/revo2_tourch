@@ -1,0 +1,335 @@
+# ============================================================
+# Revo2 灵巧手 —— 官方仿真模型 ↔ 上位机电机编号 映射表
+# ============================================================
+#
+# 这份文件是「模型层」与「控制层」之间的唯一权威对照表。
+#
+# ⚠️ 当前适用侧：**右手**（right）
+#   本项目 ELF3 实机装配的是右手：右腕 r_wrist_z_link、CAN6 / ID 127。
+#   左手数据结构与右手完全对称，仅关节名前缀为 left_，
+#   如需切左手，把下文的 right_ 全部换成 left_、腕关节换成 l_wrist_z_joint。
+#
+# 数据来源（全部为官方原文核实，非推测）：
+#   仓库  https://github.com/BrainCoTech/brainco-description
+#   文件  revo2_system/mjcf/revo2_right.xml     (11 个 hinge 关节)
+#        revo2_system/urdf/revo2_right.urdf     (含 mimic)
+#   核实日期  2026-09-22
+#   核实方式  git clone --depth 1 --filter=blob:none --sparse 后读原文
+#
+# ⚠️ 使用前必读
+#   本表描述的是【官方仿真模型】的关节结构。
+#   官方模型与我们上位机手册（gestures.yaml）的 6 个电机编号
+#   **不能一一对应**，差异见 joint_map 里 mismatch 字段。
+#   首次接真机时，必须逐指做方向标定后，才能把本表的猜测关系固化。
+# ============================================================
+
+meta:
+  source_repo: "https://github.com/BrainCoTech/brainco-description"
+  source_commit_date: "2026-05-22"
+  verified_date: "2026-09-22"
+  verified_by: "读官方原文核实（MJCF + URDF）"
+
+  # ★ 本项目实际使用的侧别（决定下文所有关节名与挂载点）
+  active_side: "right"
+
+  # 官方每条系统线的描述格式
+  formats: [urdf, mjcf, usd]
+
+  # 我们实际要用的文件（相对仓库根）；current 为当前使用侧
+  files:
+    mjcf_right: "revo2_system/mjcf/revo2_right.xml"    # ★ current
+    urdf_right: "revo2_system/urdf/revo2_right.urdf"   # ★ current
+    mjcf_left:  "revo2_system/mjcf/revo2_left.xml"     # 备选（对称结构）
+    urdf_left:  "revo2_system/urdf/revo2_left.urdf"    # 备选
+
+  # 网格资源：相对路径，从仓库根解析，或保持目录结构不变
+  mesh_root: "revo2_system/meshes/hands"
+  mesh_path_template: "../meshes/hands/{kind}/{side}/{link}.STL"
+  # kind = visual | collision ; side = left | right（按 active_side 取）
+
+  # 仓库体积实测
+  repo_size_note: "含全部 mesh，体积不大；稀疏克隆只取 mjcf+urdf 目录约 80 KB"
+
+# ── 官方模型的整体结构 ────────────────────────────────────────
+model:
+  name: "revo2_single"
+  sides_available: [left, right]
+  side_in_use: "right"
+
+  # MJCF 根 body（挂载点），**没有 pos/quat，默认在原点**
+  mjcf_root_body: "right_hand_base_link"
+  mjcf_root_body_pos: [0.0, 0.0, 0.0]
+  mjcf_root_body_quat: [1.0, 0.0, 0.0, 0.0]
+
+  # URDF 挂载链：world --fixed--> right_hand_base_link
+  urdf_root_link: "world"
+  urdf_base_joint: "right_hand_base_joint"  # type=fixed, origin 全零
+  urdf_mount_link: "right_hand_base_link"   # ← 实际要挂到腕部的 link
+
+  # 关节统计（MJCF 原文）
+  total_hinge_joints: 11
+  nq: 11
+  nv: 11
+  nu_in_file: 0            # ★ 文件里没有 <actuator> 段
+
+  # 官方文件里【没有】的东西（都要我们自己补）
+  missing_in_official:
+    - "无 <actuator> 段 → nu = 0，需要自己补执行器定义"
+    - "无 <keyframe> → 没有预设初始姿态"
+    - "无 meshdir 属性 → 靠 '../meshes/...' 相对路径解析"
+    - "MJCF 中无 <mimic> → 11 个关节全部独立可动"
+    - "MJCF 中的 body 级 inertial 已给全（质量+惯量），可直接用"
+
+  # 官方自己声明仍在进行中的工作（原文照录）
+  official_wip_note: >
+    README 原文："MJCF actuator definitions and control-ready simulation
+    settings." 仍列为 planned/ongoing work。
+    → 意思是：**官方没给执行器定义，这部分必须我们自己写。**
+
+# ── 关节清单（MJCF 原文逐条核对，右手）──────────────────────────
+joints:
+  # 拇指链：3 个独立关节
+  - id: 0
+    name: "right_thumb_metacarpal_joint"
+    parent_body: "right_thumb_metacarpal_link"
+    axis: [0, 0, 1]
+    range_rad: [0.0, 1.57]
+    actuatorfrcrange: [-0.5, 0.5]
+    mimic: null
+    human: "拇指对掌（内收/外展方向）"
+
+  - id: 1
+    name: "right_thumb_proximal_joint"
+    parent_body: "right_thumb_proximal_link"
+    axis: [-1, 0, 0]
+    range_rad: [0.0, 1.03]
+    actuatorfrcrange: [-1.1, 1.1]
+    mimic: null
+    human: "拇指近节弯曲"
+
+  - id: 2
+    name: "right_thumb_distal_joint"
+    parent_body: "right_thumb_distal_link"
+    axis: [-1, 0, 0]
+    range_rad: [0.0, 1.03]
+    actuatorfrcrange: [-1.1, 1.1]
+    mimic: null                # MJCF 无 mimic，但 URDF 里标了 mimic=1.0
+    human: "拇指远节弯曲"
+
+  # 四指：每指 2 个关节，共 8 个
+  - id: 3
+    name: "right_index_proximal_joint"
+    parent_body: "right_index_proximal_link"
+    axis: [0, 1, 0]
+    range_rad: [0.0, 1.41]
+    actuatorfrcrange: [-2.0, 2.0]
+    mimic: null
+    human: "食指近节"
+
+  - id: 4
+    name: "right_index_distal_joint"
+    parent_body: "right_index_distal_link"
+    axis: [0, 1, 0]
+    range_rad: [0.0, 1.63]
+    actuatorfrcrange: [-2.0, 2.0]
+    mimic: null                # URDF: mimic index_proximal × 1.155
+    human: "食指远节"
+
+  - id: 5
+    name: "right_middle_proximal_joint"
+    parent_body: "right_middle_proximal_link"
+    axis: [0, 1, 0]
+    range_rad: [0.0, 1.41]
+    actuatorfrcrange: [-2.0, 2.0]
+    mimic: null
+    human: "中指近节"
+
+  - id: 6
+    name: "right_middle_distal_joint"
+    parent_body: "right_middle_distal_link"
+    axis: [0, 1, 0]
+    range_rad: [0.0, 1.63]
+    actuatorfrcrange: [-2.0, 2.0]
+    mimic: null                # URDF: mimic middle_proximal × 1.155
+    human: "中指远节"
+
+  - id: 7
+    name: "right_ring_proximal_joint"
+    parent_body: "right_ring_proximal_link"
+    axis: [0, 1, 0]
+    range_rad: [0.0, 1.41]
+    actuatorfrcrange: [-2.0, 2.0]
+    mimic: null
+    human: "无名指近节"
+
+  - id: 8
+    name: "right_ring_distal_joint"
+    parent_body: "right_ring_distal_link"
+    axis: [0, 1, 0]
+    range_rad: [0.0, 1.63]
+    actuatorfrcrange: [-2.0, 2.0]
+    mimic: null                # URDF: mimic ring_proximal × 1.155
+    human: "无名指远节"
+
+  - id: 9
+    name: "right_pinky_proximal_joint"
+    parent_body: "right_pinky_proximal_link"
+    axis: [0, 1, 0]
+    range_rad: [0.0, 1.41]
+    actuatorfrcrange: [-2.0, 2.0]
+    mimic: null
+    human: "小指近节"
+
+  - id: 10
+    name: "right_pinky_distal_joint"
+    parent_body: "right_pinky_distal_link"
+    axis: [0, 1, 0]
+    range_rad: [0.0, 1.63]
+    actuatorfrcrange: [-2.0, 2.0]
+    mimic: null                # URDF: mimic pinky_proximal × 1.155
+    human: "小指远节"
+
+# ── ★★ 核心：官方模型 ↔ 上位机电机的映射（含分歧标注）★★ ──────
+joint_map:
+  status: "UNVERIFIED"
+  side: "right"
+  note: >
+    下面的对应关系是【基于命名与物理含义的推断】，不是官方给定。
+    首次接真机必须逐条标定方向与行程后才能标 verified。
+
+  # 上位机侧 6 个电机（顺序固定，与 gestures.yaml / revo2_commander.py 一致）
+  commander_motors:
+    - index: 0
+      name: "拇指Flex"
+      limit_deg: 59
+      # 推断：对应拇指弯曲的两个关节之一
+      maps_to_official: ["right_thumb_proximal_joint", "right_thumb_distal_joint"]
+      confidence: "medium"
+      mismatch: "官方是两个独立关节，我们只有一个电机号 → 需要决定：两个一起给，或只用 proximal"
+
+    - index: 1
+      name: "拇指Aux"
+      limit_deg: 90
+      maps_to_official: ["right_thumb_metacarpal_joint"]
+      confidence: "medium"
+      mismatch: >
+        ★★ 命名对不上 ★★
+        官方模型里没有任何叫 "aux" / "abduction" 的关节。
+        按物理含义（对掌外展）最接近 metacarpal，但限位 1.57 rad = 90°，
+        与我们手册写的 90° 上限数值巧合一致 → 很可能就是这个。
+        仍需真机确认。
+
+    - index: 2
+      name: "食指"
+      limit_deg: 81
+      maps_to_official: ["right_index_proximal_joint"]
+      confidence: "high"
+      mismatch: >
+        官方 81° ≈ 1.41 rad 与 proximal 的 range 0–1.41 精确吻合 → 这个基本可确定。
+        但 distal（0–1.63 rad = 93°）在上位机侧没有独立电机号。
+
+    - index: 3
+      name: "中指"
+      limit_deg: 81
+      maps_to_official: ["right_middle_proximal_joint"]
+      confidence: "high"
+      mismatch: "同上：distal (93°) 无独立电机号"
+
+    - index: 4
+      name: "无名指"
+      limit_deg: 81
+      maps_to_official: ["right_ring_proximal_joint"]
+      confidence: "high"
+      mismatch: "同上：distal (93°) 无独立电机号"
+
+    - index: 5
+      name: "小拇指"
+      limit_deg: 81
+      maps_to_official: ["right_pinky_proximal_joint"]
+      confidence: "high"
+      mismatch: "同上：distal (93°) 无独立电机号"
+
+  # ── 三条必须知道的分歧 ────────────────────────────────────
+  key_mismatches:
+    - id: M1
+      title: "「拇指Aux」在官方模型里找不到同名关节"
+      detail: >
+        官方只有 metacarpal / proximal / distal 三个拇指关节。
+        最接近 Aux 的是 metacarpal（限位恰好 90°）。标定前不要写死映射。
+      action: "首次真机：单独给 metacarpal 一个角度，看实际动的是哪个方向"
+
+    - id: M2
+      title: "官方 URDF 与 MJCF 对 distal 的处理不一致"
+      detail: >
+        URDF：四指 distal 有 <mimic joint="..._proximal_joint" multiplier="1.155">，
+              拇指 distal 有 mimic multiplier="1.0" → 即 distal 是从动。
+        MJCF：11 个关节全部无 mimic，全部独立可动。
+        同一个官方仓库，两种格式给出两种动力学语义。
+      action: >
+        仿真用 MJCF 时，要自己决定是否加等价于 URDF 的耦合。
+        建议：仿真里也把 distal 设为从动（写 mimic 或用 equality），
+        这样仿真与真机行为一致。**否则仿真里手指能做出真机做不到的姿势。**
+        实现脚本：tools/revo2_make_actuated.py（已支持左右手）
+
+    - id: M3
+      title: "真机 6 个电机 vs 模型 11 个关节"
+      detail: >
+        真机协议层只有 6 个可发角度（见 04 号文档/上位机实测）。
+        模型有 11 个独立关节。差额 5 个（4 指 distal + 拇指多出的 1 个）
+        在真机上是内部耦合、不可单独命令的。
+      action: >
+        → 我们只能命令 6 个。仿真里也必须把 distal 锁成从动，
+        否则仿真分辨率高于真机，调出来的动作真机复现不了。
+
+# ── 挂载到 ELF3 的接口约定 ───────────────────────────────────
+mount:
+  # ★ 当前使用侧
+  active_side: "right"
+
+  # ELF3 侧的腕部末端关节（臂侧 7 关节的最后一个）
+  elf3_right_wrist_joint: "r_wrist_z_joint"      # ★ 当前使用
+  elf3_left_wrist_joint:  "l_wrist_z_joint"      # 备选
+
+  # 要挂的 body / link 名
+  right_hand_root: "right_hand_base_link"        # ★ 当前使用
+  left_hand_root:  "left_hand_base_link"         # 备选
+
+  # 官方模型给的挂载位姿是「零位」，即手直接沿腕部坐标系
+  # ⚠️ 真机上法兰有实际安装偏移，仿真里这个偏移需要实测填入
+  official_mount_offset: [0.0, 0.0, 0.0]
+  official_mount_quat: [1.0, 0.0, 0.0, 0.0]
+  mount_offset_verified: false
+  mount_offset_note: >
+    官方模型把 base_link 放在原点，等于「手机械坐标系 = 腕坐标系」。
+    真机装配后必然有平移/旋转偏移，需实际量法兰厚度与朝向填入。
+    不填的后果：仿真里手的位置和真机差几厘米 → 抓取点全错。
+
+  # 需要新增的自由度（挂两只手时）
+  added_dof: 11          # 单手 11 个 hinge
+  added_dof_both: 22     # 双手
+  elf3_base_dof: 31      # ELF3 原 31 关节（不含手）
+  combined_dof_note: >
+    ELF3 31 (nq) + 右手 11 + 左手 11 = 53（若双手都挂且 distal 不锁）。
+    若 distal 锁为从动：31 + 6 + 6 = 43。
+    这些数字只影响仿真；真机永远是 31 + 6 + 6 条命令通路。
+
+# ── 获取与放置 ───────────────────────────────────────────────
+acquire:
+  method: "git clone（Ubuntu 侧实测可用）"
+  command: |
+    mkdir -p ~/robot_descriptions && cd ~/robot_descriptions
+    git clone --depth 1 https://github.com/BrainCoTech/brainco-description.git
+  light_options: |
+    # 只要 revo2 的描述（不下载其它系统线的 mesh）
+    git clone --depth 1 --filter=blob:none --sparse \
+      https://github.com/BrainCoTech/brainco-description.git
+    cd brainco-description
+    git sparse-checkout set revo2_system/mjcf revo2_system/urdf
+
+  place_note: >
+    整个 revo2_system 目录要整体保留（meshes 与 mjcf/urdf 是相对路径关系），
+    只拷 xml 不拷 meshes → MuJoCo 会报 mesh 找不到。
+
+  fallback_network: >
+    国内直连 GitHub 若失败，用 docs/10 里的加速前缀（ghfast.top / gh-proxy.com）
+    或先在 Windows 上 clone 再拷到 Ubuntu。

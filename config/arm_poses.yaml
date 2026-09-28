@@ -1,0 +1,147 @@
+# ============================================================
+# 手臂关节位姿台账（ELF3 双臂 × 7 关节）
+# ============================================================
+# 用途：给「固定位置抓取」准备几个可复用的手臂姿态，由
+#       tools/arm_pose_pub.py 通过 /hardware/actuators_cmds_override
+#       持续发布到机器人。
+#
+# ★ 本项目当前使用侧：**右臂**（right）
+#   实机右手装在右腕 r_wrist_z_link 上。台账里 left/right 两侧字段都保留，
+#   填位姿时**先填 right**；tools/arm_pose_pub.py 用 --sides right 只发右臂。
+#
+# 单位：**弧度**（rad），不是度。官方 Mod API 与 URDF 都用弧度。
+#
+# 关节顺序（左右各 7 个，按官方 31 关节布局的下标 15–21 / 22–28）：
+#   左：l_shoulder_y  l_shoulder_x  l_shoulder_z  l_elbow_y  l_wrist_x  l_wrist_y  l_wrist_z
+#   右：r_shoulder_y  r_shoulder_x  r_shoulder_z  r_elbow_y  r_wrist_x  r_wrist_y  r_wrist_z
+#
+# ⚠️⚠️ 重要 ⚠️⚠️
+#   除 zero 外，下面所有位姿的角度都是**空的**，必须自己算出来填进去。
+#   不要凭感觉填数字，也不要照抄别人机器人的解。
+#   正确做法：跑官方 IK 脚本（见 docs/13 §4.2）算出 7 个关节角，再填到这里。
+#   填完先 --check-only，再 --dry-run，最后才真发。
+#
+# ⚠️ 官方 IK 示例脚本自带的那个目标位姿**没有收敛**
+#   （误差 0.1787，肘关节和腕部 Y 顶到限位），官方明确写了
+#   「不应直接用于真机」。所以本文件没有把它当作可用位姿收录，
+#   只在 reference 段留档，供你对照输出格式。
+# ============================================================
+
+meta:
+  msg_type: communication/msg/ActuatorCmds
+  unit: radian
+  joints_per_arm: 7
+
+  # ★ 本项目实际使用侧（决定优先填哪一侧、工具默认发哪只臂）
+  active_side: "right"
+
+  arm_joint_names:
+    left:
+      - l_shoulder_y_joint
+      - l_shoulder_x_joint
+      - l_shoulder_z_joint
+      - l_elbow_y_joint
+      - l_wrist_x_joint
+      - l_wrist_y_joint
+      - l_wrist_z_joint
+    right:
+      - r_shoulder_y_joint
+      - r_shoulder_x_joint
+      - r_shoulder_z_joint
+      - r_elbow_y_joint
+      - r_wrist_x_joint
+      - r_wrist_y_joint
+      - r_wrist_z_joint
+
+  # ── PD 增益（kp / kd）──────────────────────────────────
+  # ⚠️ 官方两篇文档给的增益不一致，这里如实列出来，不要盲信任何一组：
+  #
+  #   A) Wiki《最简控制 ELF3 的 31 自由度》的 31 维 KP/KD 表：
+  #      左臂 kp = [100, 80, 80, 100, 20, 20, 20]
+  #      左臂 kd = [2.5, 2,  2,  2.5,  1,  1,  1]
+  #
+  #   B) Wiki《使用 Pinocchio 最简求解 ELF3 手臂 IK》的手臂覆盖示例：
+  #      kp = [54.224, 54.224, 16.747, 54.224, 16.747, 16.747, 16.747]
+  #      kd = [3.452,  3.452,  1.066,  3.452,  1.066,  1.066,  1.066]
+  #
+  # 本台账默认取**更柔和的 B 组**（刚度低 = 撞到东西时更不容易硬顶），
+  # 第一次调试也应该比默认更小而不是更大。第一次真机建议再乘 0.5。
+  default_kp: [54.224, 54.224, 16.747, 54.224, 16.747, 16.747, 16.747]
+  default_kd: [3.452, 3.452, 1.066, 3.452, 1.066, 1.066, 1.066]
+
+  # ── 安全阈值（tools/arm_pose_pub.py 会强制检查）─────────
+  max_angle_rad: 0.35        # 单关节默认上限 ≈ 20°，超出直接拒绝
+  min_publish_rate_hz: 5     # 官方覆盖超时 0.2 s，低于 5 Hz 必然掉覆盖
+  official_override_timeout_s: 0.2
+
+# ============================================================
+# 位姿库
+# ============================================================
+poses:
+
+  zero:
+    label: 双臂零位
+    verified: true
+    simulation_only: false
+    note: >
+      官方定义的零位就是全 0。它的意义在于：任何覆盖动作都应当
+      「从零位起、回零位止」，这样切换的瞬间不会有突跳。
+      第一次覆盖手臂前，先发这个热身。
+    left:  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    right: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+  pre_grasp:
+    label: 抓握预备位（手伸向瓶子上方）
+    verified: false
+    simulation_only: true
+    note: >
+      ★ 待填（先填 right）。这是「固定位置抓取」的第一步：把右手腕移到瓶子的
+      正上方约 10 cm 处，手掌朝下。
+      用官方 IK 脚本求解，目标位姿在 r_wrist_z_link 坐标系下：
+        position ≈ [前方距离, 侧向偏移, 高度]
+        rotation ≈ 手掌朝下（绕 X 轴约 -90°，用 R.from_euler 试）
+      注意末端原点是三个腕关节轴的交点，不是掌心 ——
+      瓶子实际落点还要减去一个手掌偏移，见 docs/13 §4.3。
+    left:  null
+    right: null
+
+  grasp_close:
+    label: 抓握位（手腕下到瓶身中下部，保持不动，等手闭合）
+    verified: false
+    simulation_only: true
+    note: ★ 待填。比 pre_grasp 再低约 8–12 cm，就是手包住瓶身的高度。
+    left:  null
+    right: null
+
+  lift:
+    label: 抬升位（抓起瓶子后举到展示高度）
+    verified: false
+    simulation_only: true
+    note: >
+      ★ 待填。从 grasp_close 抬起来，建议先抬 10 cm 再逐步加高。
+      ⚠️ 抬升过程中手必须全程保持抓握力（手走 CANFD 另一条通路，
+      不会因为臂的覆盖而松手，但臂一旦超时会带着瓶子被策略拉走）。
+    left:  null
+    right: null
+
+# ============================================================
+# 留档：官方 IK 示例脚本的原始输出（不要拿它控制真机）
+# ============================================================
+reference:
+  official_arm_ik_example:
+    source: BXI_Wiki/docs/elf3/developer/arm_ik.zh.md
+    status: 未收敛
+    warning: >
+      官方原文：「当前目标没有达到配置的收敛容差……也**不应直接用于真机**」。
+      列在这里只是为了让你对照「IK 脚本的输出长什么样、怎么填进本文件」。
+      注意其中 -0.95993（肘）和 1.309（腕 Y）已经是限位值。
+    left_rad: [-0.18420714, 0.14130363, -0.02609032, -0.95993, 0.14621128, 1.309, -0.14385886]
+    right_rad: [-0.18420714, 0.14130363, -0.02609032, -0.95993, 0.14621128, 1.309, -0.14385886]
+    note: 左右臂脚本用同一目标位姿，所以输出数值相同，但关节名按各自 URDF 对应
+
+# ============================================================
+# 变更记录
+# ============================================================
+# v1.0  2026-09-21  首版：zero 可用，其余待用 IK 填充；记录官方两处增益差异
+# v1.1  2026-09-22  侧别对齐实机：标注 active_side=right，pre_grasp 说明
+#                   由「左手腕」改为「右手腕」、l_wrist_z_link 改为 r_wrist_z_link

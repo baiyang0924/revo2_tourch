@@ -1,0 +1,124 @@
+# ============================================================
+# 现场参数台账
+# ============================================================
+# 用途：每次现场调通后立刻记录。下次出问题时对比本文件，
+#       能立刻判断出「是不是参数被改了」——这是最省时间的排查习惯。
+#
+# ⚠️ 本文件会提交到公司仓库，所以：
+#   - 不要写密码、Token、私钥
+#   - 不要写公司敏感经营数据
+# ============================================================
+
+meta:
+  robot_serial: ""            # 机器人序号（DOMAIN_ID 由它推导）
+  robot_name: "精灵3"
+  hand_model: "Revo2 触觉版"
+  hand_version_code: ""       # 版本代号：XTL / XTR / XEL / XER / XRL / XRR
+  updated_at: "2026-09-20"
+  updated_by: "小陶"
+
+# ── 整机环境（路径 A）──────────────────────────────
+elf3_integration:
+  ssh:
+    host: ""                  # 例如 192.168.1.100
+    user: "bxi"
+  ros:
+    distro: "humble"
+    ros_domain_id: ""         # 遥控器启动 = 30 + 机器人序号；App 启动 = 22
+    rmw_implementation: "rmw_cyclonedds_cpp"
+    ros_localhost_only: 0
+  workspace: "~/bxi_ws/bxi_revo2_example"
+  hands:
+    left:
+      bus: 5                  # CAN5
+      device_id: 126          # 0x7E
+      master_id: 1
+      protocol: "CANFD"
+    right:
+      bus: 6                  # CAN6
+      device_id: 127          # 0x7F
+      master_id: 1
+      protocol: "CANFD"
+  topics:
+    rx: "/canfd_packet/rx"
+    tx: "/canfd_packet/tx"
+    msg_type: "communication/msg/CANFDPacket"
+
+# ── 独立调试环境（路径 B / Windows）────────────────
+standalone_debug:
+  host_os: "Windows 11"
+  tool: "BrainCo_RevoII_Hand_Tool_win_0635_v0.0.19"
+  protocol: "MODBUS"          # 桌面调试走 485，上位机里选 MODBUS 协议
+  adapter:
+    type: "485"               # 桌面调试 = 485；CANFD 只用于整机接入
+    model: "BrainCo 485 调试模块（转接盒 + 手腕转接小板）"
+    driver_installed: false   # USB 转串口驱动：CDM-v2.12.36.20-WHQL-Certified
+    # 转接盒：TYPE-C(→电脑) / VIN(→独立供电) / 485.0 + 485.1（两条独立 485 总线）
+    # 手腕小板：CN1 6pin 排线去手腕；CN2 端子 黄=485-A 绿=485-B 黑=GND 红=VCC
+    # ⚠️ 485.0 / 485.1 没有"谁是左手"的约定，哪只在哪路以实测为准
+    channels:
+      "485.0": ""             # 实测枚举出的 COMx
+      "485.1": ""             # 实测枚举出的 COMx
+  # ⚠️ 桌面调试期间不要改 device_id / baud_rate。
+  #    改了必须记在这里 —— 否则装回机器人（CANFD，期望左 126 / 右 127）会找不到手，
+  #    现象酷似硬件故障。已改过的恢复方法：长按手背按键 5 秒恢复出厂设置。
+  left:
+    port: ""                  # 例如 COM22（以 tools/rs485_probe.py 实测为准）
+    channel: ""               # 485.0 或 485.1
+    device_id: 126
+    baud_rate: 460800         # 485 默认 460800；CANFD 数据段默认 5M
+    arbitration_baud: "1M"    # CANFD 仲裁域固定 1M
+    data_baud: "5M"
+    firmware: ""              # 扫描实测
+    verified_at: ""
+  right:
+    port: ""
+    channel: ""
+    device_id: 127
+    baud_rate: 460800
+    arbitration_baud: "1M"
+    data_baud: "5M"
+    firmware: ""
+    verified_at: ""
+
+# ── 供电参数 ───────────────────────────────────────
+power:
+  integrated:
+    source: "机器人手臂线缆"
+    voltage: "58V"
+    note: "仅进阶版/触觉版支持；基础版上限 28V，接入会烧毁"
+  standalone:
+    source: "官方电源适配器"
+    connector: "XT30UPB-M"
+    measured_voltage: ""       # 实测手端电压（负载下）
+    measured_at: ""
+
+# ── 验收记录 ───────────────────────────────────────
+acceptance_log:
+  - date: ""
+    environment: ""            # 整机 / 独立调试
+    result: ""                 # pass / fail
+    light_state: ""            # 绿灯常亮 / 黄灯 / 红灯
+    auto_open_on_power: null   # 上电后是否自动张开
+    can_read_firmware: null    # 能否读出固件版本
+    notes: ""
+
+# ── 关键约束（不要改，写在这里是提醒）───────────────
+constraints:
+  flange_screw_max_depth_mm: 3.0   # 手腕法兰螺纹孔深 3.5mm，旋入必须 < 3mm
+  angle_limits:                    # 主动关节角度上限（度）
+    thumb_flex: 59
+    thumb_aux: 90
+    index: 81
+    middle: 81
+    ring: 81
+    pinky: 81
+  motor_order:                     # 多指指令的电机顺序
+    - 拇指Flex
+    - 拇指Aux
+    - 食指
+    - 中指
+    - 无名指
+    - 小拇指
+  position_scale: 10               # 协议层位置值放大倍数
+  duration_ms_range: [1, 2000]     # 位置+时间模式的期望时间范围

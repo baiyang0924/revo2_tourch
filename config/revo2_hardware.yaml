@@ -1,0 +1,64 @@
+# ============================================================
+# Revo2 灵巧手硬件常量 —— 唯一出处
+# ============================================================
+# 用途：把「关节角度上限、电机顺序、下发时长范围、总线与设备 ID」
+#       这类固定硬件参数集中到一处。
+#       revo2_bridge_node.py 启动时读取本文件；硬件或参数变更只需改这里，
+#       不必再去代码里逐个查找替换。
+#
+# 背景：这些值原先分散在节点代码、手势库注释、仿真模型与文档中，
+#       改动时容易遗漏。集中后可单点维护。
+#
+# ⚠️ 角度上限的取值依据（勿随意放大）
+#   取「本仓库合并模型」与「官方驱动文档」两者的**交集**，
+#   任何一个都不超过，这样仿真与真机都不会越界。
+#
+#   电机        对应关节（官方驱动）              合并模型 ctrlrange   官方驱动 README   取交集
+#   拇指Flex    right_thumb_proximal_joint        0~59.0°              0~60°             59
+#   拇指Aux     right_thumb_metacarpal_joint      0~90.0°              0~89°             89   ← 原为 90，超官方 1°
+#   食指        right_index_proximal_joint        0~80.8° (1.41 rad)   0~81°             80.8
+#   中指        right_middle_proximal_joint       同上                  同上              80.8
+#   无名指      right_ring_proximal_joint         同上                  同上              80.8
+#   小拇指      right_pinky_proximal_joint        同上                  同上              80.8
+#
+#   出处：合并模型 elf3_revo2_right.xml 的 <position ctrlrange=...>；
+#         官方驱动 brainco_hand_driver/README_CN.md「关节映射」表。
+# ============================================================
+
+meta:
+  hand: right
+  note: 硬件常量集中表；修改角度上限前请先更新上方的取值依据表
+
+# ── 下发数组的顺序（SDK 侧） ──────────────────────────────
+# ⚠️ 改动此处必须同步调整 angle_limits 与 joint_map 的对应关系
+motor_order:
+  - 拇指Flex
+  - 拇指Aux
+  - 食指
+  - 中指
+  - 无名指
+  - 小拇指
+
+# ── 每个电机的角度上限（度），与 motor_order 一一对应 ──────
+angle_limits: [59.0, 89.0, 80.8, 80.8, 80.8, 80.8]
+
+# ── 下发时长允许范围（毫秒） ──────────────────────────────
+duration_range: [1, 2000]
+
+# ── 电子侧参数 ────────────────────────────────────────────
+bus:
+  left: 5
+  right: 6
+device_id:
+  left: 126
+  right: 127
+master_id: 1
+
+# ── 电机 → 关节名（用于状态提示与文档） ────────────────────
+joint_map:
+  拇指Flex: right_thumb_proximal_joint
+  拇指Aux: right_thumb_metacarpal_joint
+  食指: right_index_proximal_joint
+  中指: right_middle_proximal_joint
+  无名指: right_ring_proximal_joint
+  小拇指: right_pinky_proximal_joint
