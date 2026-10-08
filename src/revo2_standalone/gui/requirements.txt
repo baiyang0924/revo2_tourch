@@ -1,0 +1,12 @@
+# 电脑直连数据手套 GUI · 依赖清单（锁定为开发机实测通过的版本）
+#
+# 安装：pip install -r requirements.txt
+# Python：3.10 及以上（开发机在 3.14 上实测通过；一键启动器会自动检查版本）
+
+opencv-python==5.0.0.93    # Apache-2.0 —— 摄像头采集与画面绘制
+mediapipe==1.1.0           # Apache-2.0 —— 手部关键点识别
+pyserial==3.5              # BSD-3-Clause —— Modbus-RTU 串口通信
+pillow==12.3.0             # MIT-CMU —— 把视频帧贴进 tkinter 窗口
+
+# 如 mediapipe 装不上（Python 版本过新导致没有对应 wheel），可退回上一稳定版：
+# mediapipe==0.10.14

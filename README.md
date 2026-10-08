@@ -22,6 +22,7 @@
 | 8 | 整机 M0 覆盖通道实测：QoS、释放时序、频率边界、平衡耦合阈值 | `docs/15` | 实测数据齐备 |
 | 9 | 官方手模型拼入整机模型，抓水瓶复合动作端到端仿真 | `tools/revo2_pick_bottle_demo.py` | 仿真基准达成 |
 | 10 | 21 篇过程文档，覆盖环境边界、接线、协议、排障、路线决议 | `docs/` | 持续维护 |
+| 11 | 电脑直连数据手套 GUI：摄像头手势模仿 + 力矩调节 + 逐指体检（USB-485 直连本机，不经机器人） | `src/revo2_standalone/gui/` | 真机已跑通 |
 
 ---
 
@@ -147,7 +148,8 @@ sudo tr "\0" "\n" < /proc/<pid>/environ | grep -E "ROS_DOMAIN|RMW|CYCLONEDDS"
 │
 ├── src/
 │   ├── elf3_ros2/                     # ROS 2 节点：bridge（驱动）+ commander（上位）
-│   └── revo2_standalone/              # Windows 单手调试脚本
+│   └── revo2_standalone/              # Windows 单手调试：自检、Modbus 库
+│       └── gui/                       # 电脑直连数据手套 GUI（摄像头手势模仿）
 │
 ├── config/
 │   ├── revo2_hardware.yaml            # ★ 硬件参数单一来源（限位 / 总线 / ID / 关节映射）
@@ -169,6 +171,7 @@ sudo tr "\0" "\n" < /proc/<pid>/environ | grep -E "ROS_DOMAIN|RMW|CYCLONEDDS"
 | 手装到机器人上了，要从电脑控它 | `docs/18` |
 | 不想敲命令，Windows 上双击就用 | `docs/19` → `tools/revo2_hand_console.bat` |
 | 想让机器人的手跟着自己的手做动作 | `docs/20` → `tools/revo2_teleop.bat` |
+| 手插在自己电脑上，想让手跟着手动（不经机器人） | `src/revo2_standalone/gui/` → 双击 `start_gui.bat` |
 | 仿真里本体不含手，想把手拼进去 | `docs/14` |
 | 覆盖了手臂但没反应 / 想录视频看不出在动 | `docs/15` |
 | 要「拿起瓶装水」，不知先编手还是先编臂 | `docs/13` |
