@@ -61,7 +61,7 @@ REG_CANFD_BAUD = 1002            # CANFD 波特率
 REG_CANFD_SAMPLE = 1003          # CANFD 仲裁域采样点
 REG_RESTART = 1009               # 重启
 
-REG_POS_TIME_MULTI = 1010        # 多指：位置 + 时间（位置×10，时间 1~2000ms）
+REG_POS_TIME_MULTI = 1010        # 多指：位置 + 时间（12 个寄存器，位置/时间按手指成对交错）
 REG_POS_SPEED_MULTI = 1022       # 多指：位置 + 速度
 REG_SPEED_MULTI = 1034           # 多指：速度
 REG_CURRENT_MULTI = 1040         # 多指：电流
@@ -230,6 +230,16 @@ def _decode_ascii(payload: bytes) -> str:
     return "".join(chr(b) if 32 <= b < 127 else " " for b in payload).strip()
 
 
+def _to_signed16(v: int) -> int:
+    """无符号 16 位 → 有符号（二进制补码）。
+
+    协议里速度 / 电流是含方向符号的（负值 = 反方向），
+    寄存器解出来是 0–65535，得在这里还原符号：
+    65510 → -26。不还原的话，屏幕上会出现 65510 mA 这种鬼数值。
+    """
+    return v - 0x10000 if v >= 0x8000 else v
+
+
 # ══════════════════════════════════════════════════════════════
 # 客户端
 # ══════════════════════════════════════════════════════════════
@@ -369,12 +379,14 @@ class Revo2Hand:
         return [r / POSITION_SCALE for r in regs]
 
     def read_speeds(self) -> list[int]:
-        """读 6 个电机的实际速度（含方向符号）。"""
-        return self.read_registers(REG_ACTUAL_SPEED, MOTOR_COUNT)
+        """读 6 个电机的实际速度（含方向符号，负值 = 反方向）。"""
+        return [_to_signed16(r)
+                for r in self.read_registers(REG_ACTUAL_SPEED, MOTOR_COUNT)]
 
     def read_currents(self) -> list[int]:
-        """读 6 个电机的实际电流（含方向符号）。"""
-        return self.read_registers(REG_ACTUAL_CURRENT, MOTOR_COUNT)
+        """读 6 个电机的实际电流（含方向符号，负值 = 反方向，单位 mA）。"""
+        return [_to_signed16(r)
+                for r in self.read_registers(REG_ACTUAL_CURRENT, MOTOR_COUNT)]
 
     def read_motor_status(self) -> list[str]:
         """读 6 个电机的状态文字。"""
@@ -414,14 +426,47 @@ class Revo2Hand:
         """触发手动位置校准（仅在自动校准关闭时有效）。"""
         return self.write_register(REG_MANUAL_CALIB, 1, allow_write=allow_write)
 
+    def read_unit_mode(self) -> int:
+        """读单位模式（寄存器 937）：0=归一化(0–1000)，1=物理单位（度）。"""
+        regs = self.read_registers(REG_UNIT_MODE, 1, input_reg=False)
+        return regs[0] if regs else -1
+
+    def ensure_physical_unit_mode(self, allow_write: bool = False) -> bool:
+        """确保手处于「物理单位（度）」模式，否则度数会被按百分比解释。
+
+        返回 True 表示当前已是物理模式（或已切换成功）。
+        """
+        if self.read_unit_mode() == 1:
+            return True
+        self.write_register(REG_UNIT_MODE, 1, allow_write=allow_write)
+        return self.read_unit_mode() == 1
+
     def set_angles(self, angles_deg: Iterable[float], duration_ms: int = 1000,
                    allow_write: bool = False) -> bool:
         """用「位置 + 时间」模式下发 6 个目标角度（度）。
 
+        官方文档《多个手指位置时间控制/1010》：寄存器 1010 起共 **12 个**
+        保持寄存器，按手指成对交错排列——
+
+            1010=拇Flex位置  1011=拇Flex时间
+            1012=拇Aux位置   1013=拇Aux时间
+            1014=食指位置    1015=食指时间
+            1016=中指位置    1017=中指时间
+            1018=无名指位置  1019=无名指时间
+            1020=小指位置    1021=小指时间
+
+        ⚠️ 这里曾误写成「6 个位置 + 1 个时间」共 7 个寄存器，导致整块错位：
+        中指只收到时长（恒定值）、无名指/小指从未被写入，还常触发异常码 3。
+        2026-10-08 在真机上用 12 寄存器格式复测：六指全部正常到位。
+
         Args:
             angles_deg: 长度 6，顺序为
                 [拇指Flex, 拇指Aux, 食指, 中指, 无名指, 小拇指]
-            duration_ms: 期望时间，范围 1–2000 ms
+            duration_ms: 每根手指的期望时间，范围 1–2000 ms
+
+        注意：位置值的单位取决于「单位模式」寄存器 937——
+        0=归一化(0–1000)，1=物理单位（度）。本库按物理单位处理（度×10 下发），
+        手若处于归一化模式请先 ensure_physical_unit_mode()。
         """
         if not allow_write:
             raise Revo2Error(
@@ -444,8 +489,7 @@ class Revo2Hand:
                     f"{MOTOR_ORDER[i]} 的角度 {ang}° 超出安全范围 0–{limits[i]}°"
                 )
             payload.append(int(round(ang * POSITION_SCALE)))
-        # 追加期望时间（寄存器 1010 的数据段含时间字段，具体排布以官方文档为准）
-        payload.append(duration_ms)
+            payload.append(int(duration_ms))   # 每指位置后紧跟它的期望时间
         return self.write_registers(REG_POS_TIME_MULTI, payload,
                                     allow_write=allow_write)
 
@@ -474,8 +518,9 @@ def _selftest() -> int:
     check_frame(write_single)
     print("  帧 CRC 校验           OK")
 
-    multi = build_write_multiple(126, REG_POS_TIME_MULTI, [0, 0, 0, 0, 0, 0, 1000])
-    print(f"  多指写帧 (7 寄存器)    {multi.hex(' ')}")
+    multi = build_write_multiple(126, REG_POS_TIME_MULTI,
+                                 [0, 1000] * 6)
+    print(f"  多指写帧 (12 寄存器)   {multi.hex(' ')}")
     check_frame(multi)
     print("  多指帧 CRC 校验        OK")
 
